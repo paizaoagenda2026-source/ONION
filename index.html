@@ -34,8 +34,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
     body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
     .tabs-container { padding-top: calc(10px + env(safe-area-inset-top)); }
 }
-.login-container { display: flex; justify-content: center; align-items: center; height: 100vh; background: url('cebola.jpg') no-repeat center center fixed; background-size: cover; }
-.login-box { background: rgba(255, 255, 255, 0.92); padding: 40px; border-radius: var(--radius); box-shadow: 0 15px 30px rgba(0,0,0,0.3); width: 400px; max-width: 92vw; text-align: center; }
+.login-container { position: relative; display: flex; justify-content: center; align-items: center; min-height: 100vh; min-height: 100dvh; width: 100%; padding: 20px 0; overflow: hidden; background-color: #343a40; }
+.login-container::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-image: url('cebola.jpg'); background-repeat: no-repeat; background-position: center center; background-size: cover; z-index: 0; }
+.login-container::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.35); z-index: 1; pointer-events: none; }
+.login-box { position: relative; z-index: 2; background: rgba(255, 255, 255, 0.95); padding: 40px; border-radius: var(--radius); box-shadow: 0 15px 30px rgba(0,0,0,0.3); width: 400px; max-width: 92vw; text-align: center; }
 .login-logo { width: 130px; height: 130px; object-fit: cover; border-radius: 50%; display: block; margin: 0 auto 15px auto; border: 4px solid var(--primary); box-shadow: 0 6px 18px rgba(0,0,0,0.25); background: #fff; }
 .login-box h1 { color: var(--primary); margin-bottom: 10px; font-size: 28px; }
 .login-box h2 { color: var(--secondary); margin-bottom: 30px; font-size: 20px; }
@@ -1802,24 +1804,75 @@ function sairSistema() {
         if (btn) {
             let baixado = false;
             try { baixado = localStorage.getItem('cebola_app_downloaded') === '1'; } catch (e) {}
-            btn.style.display = baixado ? 'none' : 'block';
+            let emModoApp = false;
+            try {
+                emModoApp = window.matchMedia('(display-mode: standalone)').matches
+                    || window.matchMedia('(display-mode: fullscreen)').matches
+                    || window.navigator.standalone === true;
+            } catch(e) {}
+            btn.style.display = (baixado || emModoApp) ? 'none' : 'block';
         }
     } catch (e) {}
     setTimeout(() => { const el = document.getElementById('loginPassword'); if (el) el.focus(); }, 50);
 }
 
+let _deferredInstallPromptLogin = null;
+
+window.addEventListener('beforeinstallprompt', function(e) {
+    e.preventDefault();
+    _deferredInstallPromptLogin = e;
+    const btn = document.getElementById('downloadAppBtn');
+    if (btn) btn.style.display = 'block';
+});
+
+window.addEventListener('appinstalled', function() {
+    _deferredInstallPromptLogin = null;
+    try { localStorage.setItem('cebola_app_downloaded', '1'); } catch(e) {}
+    const btn = document.getElementById('downloadAppBtn');
+    if (btn) btn.style.display = 'none';
+});
+
 (function configurarBotaoDownloadApp() {
     const DOWNLOAD_FLAG = 'cebola_app_downloaded';
+
+    function estaRodandoComoApp() {
+        try {
+            return window.matchMedia('(display-mode: standalone)').matches
+                || window.matchMedia('(display-mode: fullscreen)').matches
+                || window.navigator.standalone === true;
+        } catch(e) { return false; }
+    }
+
     function aplicarEstado() {
         const btn = document.getElementById('downloadAppBtn');
         if (!btn) return;
+        if (estaRodandoComoApp()) { btn.style.display = 'none'; return; }
         let baixado = false;
         try { baixado = localStorage.getItem(DOWNLOAD_FLAG) === '1'; } catch (e) {}
         if (baixado) { btn.style.display = 'none'; return; }
         btn.style.display = 'block';
         if (btn.dataset.bound === '1') return;
         btn.dataset.bound = '1';
-        btn.addEventListener('click', function() {
+
+        btn.addEventListener('click', async function() {
+            if (_deferredInstallPromptLogin) {
+                try {
+                    _deferredInstallPromptLogin.prompt();
+                    const choice = await _deferredInstallPromptLogin.userChoice;
+                    if (choice && choice.outcome === 'accepted') {
+                        try { localStorage.setItem(DOWNLOAD_FLAG, '1'); } catch(e) {}
+                        btn.style.display = 'none';
+                    }
+                } catch(e) {}
+                _deferredInstallPromptLogin = null;
+                return;
+            }
+            const ua = navigator.userAgent || '';
+            const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+            if (isIOS) {
+                alert('📲 COMO INSTALAR NO iPHONE/iPAD:\n\n1) Toque no botão Compartilhar (□↑)\n2) Role e toque em "Adicionar à Tela de Início"\n3) Confirme tocando em "Adicionar"');
+                return;
+            }
             try {
                 const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
                 const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
@@ -1834,7 +1887,9 @@ function sairSistema() {
                 setTimeout(function() { try { URL.revokeObjectURL(url); } catch (e) {} }, 2000);
                 try { localStorage.setItem(DOWNLOAD_FLAG, '1'); } catch (e) {}
                 btn.style.display = 'none';
-            } catch (e) { alert('Não foi possível baixar o aplicativo. Tente novamente.'); }
+            } catch (e) {
+                alert('📲 COMO INSTALAR:\n\n• ANDROID (Chrome): Menu ⋮ → "Instalar aplicativo"\n\n• iPHONE (Safari): Compartilhar → "Adicionar à Tela de Início"\n\n• COMPUTADOR (Chrome/Edge): Ícone de instalar na barra');
+            }
         });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', aplicarEstado);
